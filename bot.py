@@ -1,215 +1,228 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import os
 import json
-import random
 import datetime
+import secrets
 import telebot
 from telebot import types
+import yt_dlp
 
 # ================= CONFIG =================
-API_TOKEN = os.getenv("8224596860:AAGnZj9hYF9uvuJE7JKnWhduALOaqRP4C8I")
+API_TOKEN = os.getenv("8615288381:AAGwDHusKLlS4zTrf6IOiFuLLf9DICYcOCM")
+ADMIN_ID = int(os.getenv("ADMIN_ID", 8210146346))
 
-if not API_TOKEN:
-    raise ValueError("❌ BOT_TOKEN not set!")
-
-# 👉 Multiple channels
-CHANNELS = [
-    "@primiumboss29",
-    "@saniedit9"
-]
-
-ADMIN_USERNAME = "@jiolinhacker"
-
-DEFAULT_VIDEO_LIMIT = 3
-DEFAULT_LOC_LIMIT = 5
-
-REF_BONUS = 2  # referral এ extra limit
+CHANNEL_1 = "@samiedit9"
+CHANNEL_2 = "@primiumboss29"
 
 DB_FILE = "bot_data.json"
 
-# ================= DB =================
+VIDEO_LIMIT = 3
+LOC_LIMIT = 5
+
+bot = telebot.TeleBot(API_TOKEN)
+
+# ================= DATABASE =================
 def load_db():
-    try:
-        if os.path.exists(DB_FILE):
-            with open(DB_FILE, "r") as f:
-                return json.load(f)
-    except:
-        pass
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            return json.load(f)
     return {}
 
-def save_db(data):
+def save_db():
     with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+        json.dump(user_data, f, indent=2)
 
 user_data = load_db()
 
 # ================= USER =================
-def get_user(chat_id):
-    chat_id = str(chat_id)
+def get_user(uid):
+    uid = str(uid)
 
-    if chat_id not in user_data:
-        user_data[chat_id] = {
-            "ref": f"REF{random.randint(1000,9999)}",
-            "ref_by": None,
-            "bonus": 0,
-            "is_premium": False,
+    if uid not in user_data:
+        user_data[uid] = {
             "video": 0,
             "loc": 0,
-            "date": str(datetime.date.today())
+            "date": str(datetime.date.today()),
+            "premium": False,
+            "ref": f"REF{secrets.token_hex(3)}",
+            "referred_by": None,
+            "ref_count": 0
         }
-        save_db(user_data)
+        save_db()
 
-    return user_data[chat_id]
+    return user_data[uid]
 
-def reset_daily(user):
+# ================= RESET =================
+def reset(uid):
+    u = get_user(uid)
     today = str(datetime.date.today())
-    if user["date"] != today:
-        user["video"] = 0
-        user["loc"] = 0
-        user["date"] = today
 
-# ================= JOIN CHECK =================
-def is_joined(chat_id):
-    for ch in CHANNELS:
-        try:
-            member = bot.get_chat_member(ch, chat_id)
-            if member.status not in ["member", "creator", "administrator"]:
-                return False
-        except:
+    if u["date"] != today:
+        u["video"] = 0
+        u["loc"] = 0
+        u["date"] = today
+        save_db()
+
+# ================= CHANNEL CHECK =================
+def check_join(uid):
+    try:
+        m1 = bot.get_chat_member(CHANNEL_1, uid)
+        m2 = bot.get_chat_member(CHANNEL_2, uid)
+
+        if m1.status in ["left", "kicked"] or m2.status in ["left", "kicked"]:
+            bot.send_message(uid, f"⚠️ আগে দুইটা চ্যানেল join করুন:\n{CHANNEL_1}\n{CHANNEL_2}")
             return False
-    return True
+        return True
+    except:
+        return True
 
-def join_markup():
-    m = types.InlineKeyboardMarkup()
-    for ch in CHANNELS:
-        m.add(types.InlineKeyboardButton(f"📢 Join {ch}", url=f"https://t.me/{ch.replace('@','')}"))
-    m.add(types.InlineKeyboardButton("✅ Verify", callback_data="verify"))
+# ================= MENU =================
+def menu(uid):
+    m = types.InlineKeyboardMarkup(row_width=2)
+
+    m.add(
+        types.InlineKeyboardButton("🎬 Video", callback_data="video"),
+        types.InlineKeyboardButton("📍 Location", callback_data="loc")
+    )
+
+    if int(uid) == ADMIN_ID:
+        m.add(types.InlineKeyboardButton("👑 Admin Panel", callback_data="admin"))
+
     return m
-
-# ================= BOT =================
-bot = telebot.TeleBot(API_TOKEN, parse_mode="HTML")
 
 # ================= START =================
 @bot.message_handler(commands=["start"])
 def start(msg):
-    chat_id = msg.chat.id
-    args = msg.text.split()
+    uid = msg.chat.id
+    reset(uid)
 
-    user = get_user(chat_id)
+    u = get_user(uid)
 
-    # 👉 Referral system
-    if len(args) > 1:
-        ref_code = args[1]
-        if not user["ref_by"]:
-            for uid, data in user_data.items():
-                if data["ref"] == ref_code and uid != str(chat_id):
-                    user["ref_by"] = uid
-                    user_data[uid]["bonus"] += REF_BONUS
-                    save_db(user_data)
-                    break
+    bot.send_message(
+        uid,
+        f"""👋 Welcome
 
-    if not is_joined(chat_id):
-        bot.send_message(chat_id, "❌ Join all channels first!", reply_markup=join_markup())
-        return
-
-    reset_daily(user)
-
-    bot.send_message(chat_id, "👋 Welcome!", reply_markup=main_menu())
-
-# ================= MENU =================
-def main_menu():
-    m = types.InlineKeyboardMarkup()
-    m.add(types.InlineKeyboardButton("🎬 Video", callback_data="video"))
-    m.add(types.InlineKeyboardButton("📍 Location", callback_data="loc"))
-    m.add(types.InlineKeyboardButton("👥 Referral", callback_data="ref"))
-    return m
+🎬 Video Left: {VIDEO_LIMIT - u['video']}
+📍 Loc Left: {LOC_LIMIT - u['loc']}
+💎 Premium: {'YES' if u['premium'] else 'NO'}""",
+        reply_markup=menu(uid)
+    )
 
 # ================= CALLBACK =================
 @bot.callback_query_handler(func=lambda c: True)
-def cb(call):
-    chat_id = call.message.chat.id
-    user = get_user(chat_id)
-    reset_daily(user)
+def cb(c):
+    uid = c.message.chat.id
+    u = get_user(uid)
 
-    # 🔁 Auto recheck
-    if not is_joined(chat_id):
-        bot.send_message(chat_id, "❌ Join required!", reply_markup=join_markup())
-        return
+    bot.answer_callback_query(c.id)
 
-    # VERIFY
-    if call.data == "verify":
-        if is_joined(chat_id):
-            bot.send_message(chat_id, "✅ Verified!")
-            bot.send_message(chat_id, "🎉 Access granted", reply_markup=main_menu())
+    # -------- VIDEO --------
+    if c.data == "video":
+
+        if not check_join(uid):
+            return
+
+        if u["video"] >= VIDEO_LIMIT and not u["premium"]:
+            bot.send_message(uid, "❌ Video limit শেষ!")
+            return
+
+        bot.send_message(uid, "🎬 YouTube link পাঠাও:")
+        bot.register_next_step_handler(c.message, download_video)
+
+    # -------- LOCATION --------
+    elif c.data == "loc":
+
+        if not check_join(uid):
+            return
+
+        if u["loc"] >= LOC_LIMIT and not u["premium"]:
+            bot.send_message(uid, "❌ Location limit শেষ!")
+            return
+
+        bot.send_message(uid, "📍 Location লিখো:")
+        bot.register_next_step_handler(c.message, location_request)
+
+    # -------- ADMIN --------
+    elif c.data == "admin":
+        if uid != ADMIN_ID:
+            return
+
+        total = len(user_data)
+        premium = sum(1 for x in user_data.values() if x["premium"])
+
+        bot.send_message(uid, f"""👑 ADMIN PANEL
+
+👥 Users: {total}
+💎 Premium: {premium}""")
+
+    # -------- PREMIUM GIVE --------
+    elif c.data.startswith("make_premium_"):
+        if uid != ADMIN_ID:
+            return
+
+        target = c.data.split("_")[2]
+        if target in user_data:
+            user_data[target]["premium"] = True
+            save_db()
+            bot.send_message(uid, "✅ Premium given!")
         else:
-            bot.send_message(chat_id, "❌ এখনও join করেননি!")
+            bot.send_message(uid, "❌ User not found")
 
-    # VIDEO
-    elif call.data == "video":
-        limit = DEFAULT_VIDEO_LIMIT + user["bonus"]
-
-        if not user["is_premium"] and user["video"] >= limit:
-            bot.send_message(chat_id, "❌ Limit finished!")
-            return
-
-        msg = bot.send_message(chat_id, "Send video link:")
-        bot.register_next_step_handler(msg, process_video)
-
-    # LOCATION
-    elif call.data == "loc":
-        limit = DEFAULT_LOC_LIMIT + user["bonus"]
-
-        if not user["is_premium"] and user["loc"] >= limit:
-            bot.send_message(chat_id, "❌ Limit finished!")
-            return
-
-        bot.send_message(chat_id, f"📍 Admin: https://t.me/{ADMIN_USERNAME}")
-        user["loc"] += 1
-        save_db(user_data)
-
-    # REFERRAL
-    elif call.data == "ref":
-        link = f"https://t.me/YOUR_BOT_USERNAME?start={user['ref']}"
-        bot.send_message(
-            chat_id,
-            f"👥 Referral Link:\n{link}\n\n🎁 Bonus: {user['bonus']}"
-        )
-
-# ================= DOWNLOAD =================
-def process_video(msg):
-    chat_id = msg.chat.id
-    user = get_user(chat_id)
-
+# ================= VIDEO =================
+def download_video(msg):
+    uid = msg.chat.id
+    u = get_user(uid)
     link = msg.text.strip()
 
-    if not link.startswith("http"):
-        bot.send_message(chat_id, "❌ Invalid link")
-        return
-
-    bot.send_message(chat_id, "⏳ Downloading...")
+    bot.send_message(uid, "⏳ Download হচ্ছে...")
 
     try:
-        import yt_dlp
+        file = f"{uid}.mp4"
 
-        file = f"{chat_id}.mp4"
+        ydl_opts = {
+            "format": "best[ext=mp4]",
+            "outtmpl": file,
+            "quiet": True
+        }
 
-        with yt_dlp.YoutubeDL({"outtmpl": file, "quiet": True}) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([link])
 
         with open(file, "rb") as f:
-            bot.send_video(chat_id, f)
+            bot.send_video(uid, f)
 
         os.remove(file)
 
-        if not user["is_premium"]:
-            user["video"] += 1
-            save_db(user_data)
+        if not u["premium"]:
+            u["video"] += 1
+            save_db()
+
+        bot.send_message(uid, "✅ Done!")
 
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Error: {e}")
+        bot.send_message(uid, f"❌ Error: {e}")
+
+# ================= LOCATION =================
+def location_request(msg):
+    uid = msg.chat.id
+    u = get_user(uid)
+
+    bot.send_message(uid, f"📍 Request received: {msg.text}")
+
+    if not u["premium"]:
+        u["loc"] += 1
+        save_db()
+
+# ================= ADMIN GIVE PREMIUM =================
+@bot.message_handler(func=lambda m: m.chat.id == ADMIN_ID)
+def admin_text(msg):
+    try:
+        uid = msg.text.strip()
+        user_data[uid]["premium"] = True
+        save_db()
+        bot.send_message(msg.chat.id, f"✅ Premium given to {uid}")
+    except:
+        pass
 
 # ================= RUN =================
-print("🚀 Bot running...")
-bot.infinity_polling(skip_pending=True)
+print("🚀 PRO BOT RUNNING...")
+bot.infinity_polling()
